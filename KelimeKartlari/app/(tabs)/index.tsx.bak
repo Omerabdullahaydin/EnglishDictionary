@@ -1,5 +1,5 @@
-﻿import React, { useState, useEffect } from 'react';
-import { StyleSheet, TextInput, TouchableOpacity, Modal, View, Alert } from 'react-native';
+import React, { useMemo, useState, useEffect } from 'react';
+import { StyleSheet, TextInput, TouchableOpacity, Modal, ScrollView, View } from 'react-native';
 import { Link } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../contexts/auth-context';
@@ -9,7 +9,12 @@ import { ThemedView } from '@/components/themed-view';
 import { useWords } from '../../contexts/word-context';
 
 export default function HomeScreen() {
-  const { addFolder, setSearchQuery, setSelectedCategory } = useWords();
+  const {
+    words,
+    addFolder,
+    setSearchQuery,
+    setSelectedCategory,
+  } = useWords();
 
   const { isLoggedIn, login, register, logout } = useAuth();
 
@@ -19,12 +24,8 @@ export default function HomeScreen() {
   const [isRegisterMode, setIsRegisterMode] = useState(false);
   const [authPurpose, setAuthPurpose] = useState<'login'|'register'|'pinSet'|'pinEnter'>('login');
   const [translateQuery, setTranslateQuery] = useState('');
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [translationResult, setTranslationResult] = useState<string | null>(null);
-  const [dictReady, setDictReady] = useState(false);
-  const [dictError, setDictError] = useState<string | null>(null);
 
-  // sifre (pin) depolama; giris/kayitta da kullaniliyor
+  // şifre (pin) depolama; giriş/kayıtta da kullanılıyor
   const [passcode, setPasscode] = useState<string | null>(null);
   const [pinInput, setPinInput] = useState('');
 
@@ -38,34 +39,20 @@ export default function HomeScreen() {
     setSearchQuery('');
   }, [setSearchQuery]);
 
-  useEffect(() => {
-    let cancelled = false;
-    import('../../lib/dictionary')
-      .then(mod => mod.getDictionaryDb())
-      .then(() => {
-        if (!cancelled) setDictReady(true);
-      })
-      .catch(() => {
-        if (!cancelled) setDictError('Sozluk verisi yuklenemedi');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // yardimci: klasor ekleme yalnizca girisli kullaniciya acik
+  // yardımcı: klasör ekleme yalnızca girişli kullanıcıya açık
   const onAddFolderPress = () => {
     if (isLoggedIn) {
       setFolderModalVisible(true);
     } else {
-      // giris yapmalari icin modal goster
+      // giriş yapmaları için modal göster
       setIsRegisterMode(false);
       setAuthPurpose('login');
       setAuthModalVisible(true);
     }
   };
 
-  // giris/kayit yazi baglantilari goster
+
+  // giriş/kayıt yazı bağlantıları göster
   const authButtons = !isLoggedIn && (
     <View style={styles.authRowRight}>
       <TouchableOpacity
@@ -75,7 +62,7 @@ export default function HomeScreen() {
           setAuthModalVisible(true);
         }}
       >
-        <ThemedText style={styles.authText}>Giris Yap</ThemedText>
+        <ThemedText style={styles.authText}>Giriş Yap</ThemedText>
       </TouchableOpacity>
       <TouchableOpacity
         onPress={() => {
@@ -84,7 +71,7 @@ export default function HomeScreen() {
           setAuthModalVisible(true);
         }}
       >
-        <ThemedText style={[styles.authText, { marginLeft: 15 }]}>Kayit Ol</ThemedText>
+        <ThemedText style={[styles.authText, { marginLeft: 15 }]}>Kayıt Ol</ThemedText>
       </TouchableOpacity>
     </View>
   );
@@ -102,52 +89,93 @@ export default function HomeScreen() {
             onPress={() => { logout(); setUserMenuVisible(false); }}
             style={styles.userMenuItem}
           >
-            <ThemedText>Cikis Yap</ThemedText>
+            <ThemedText>Çıkış Yap</ThemedText>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => { /* profile edit action */ setUserMenuVisible(false); }}
             style={styles.userMenuItem}
           >
-            <ThemedText>Profili Duzenle</ThemedText>
+            <ThemedText>Profili Düzenle</ThemedText>
           </TouchableOpacity>
         </View>
+      )}
       )}
     </View>
   );
 
-  useEffect(() => {
+
+  const translationMaps = useMemo(() => {
+    const addToMap = (map: Map<string, string[]>, key: string, value: string) => {
+      const list = map.get(key) ?? [];
+      if (!list.includes(value)) list.push(value);
+      map.set(key, list);
+    };
+
+    const englishMap = new Map<string, string[]>();
+    const turkishMap = new Map<string, string[]>();
+
+    words.forEach(word => {
+      addToMap(englishMap, word.english.toLowerCase(), word.turkish);
+      addToMap(turkishMap, word.turkish.toLowerCase(), word.english);
+    });
+
+    return { englishMap, turkishMap };
+  }, [words]);
+
+  const translationResult = useMemo(() => {
     const rawQuery = translateQuery.trim();
-    if (!rawQuery || rawQuery.includes(' ') || !dictReady) {
-      setSuggestions([]);
-      setTranslationResult(null);
-      return;
+    if (!rawQuery) return null;
+
+    const { englishMap, turkishMap } = translationMaps;
+    const wordPattern = /[A-Za-z\u00C7\u011E\u0130\u00D6\u015E\u00DC\u00E7\u011F\u0131\u00F6\u015F\u00FC']+/;
+    const parts = rawQuery.match(/[A-Za-z\u00C7\u011E\u0130\u00D6\u015E\u00DC\u00E7\u011F\u0131\u00F6\u015F\u00FC']+|[^A-Za-z\u00C7\u011E\u0130\u00D6\u015E\u00DC\u00E7\u011F\u0131\u00F6\u015F\u00FC']+/g) ?? [rawQuery];
+
+    if (parts.length === 1 && wordPattern.test(parts[0])) {
+      const key = parts[0].toLowerCase();
+      const candidates = englishMap.get(key) ?? turkishMap.get(key) ?? [];
+      if (candidates.length === 0) return null;
+      return candidates.join(', ');
     }
 
-    let cancelled = false;
-    const handle = setTimeout(async () => {
-      try {
-        const dict = await import('../../lib/dictionary');
-        const [sugs, translations] = await Promise.all([
-          dict.querySuggestions(rawQuery),
-          dict.queryExactTranslations(rawQuery),
-        ]);
-        if (!cancelled) {
-          setSuggestions(sugs);
-          setTranslationResult(translations.length ? translations.join(', ') : null);
-        }
-      } catch {
-        if (!cancelled) {
-          setSuggestions([]);
-          setTranslationResult(null);
-        }
-      }
-    }, 150);
+    const translated = parts.map(part => {
+      if (!wordPattern.test(part)) return part;
+      const key = part.toLowerCase();
+      const fromEnglish = englishMap.get(key);
+      if (fromEnglish && fromEnglish.length > 0) return fromEnglish[0];
+      const fromTurkish = turkishMap.get(key);
+      if (fromTurkish && fromTurkish.length > 0) return fromTurkish[0];
+      return part;
+    });
 
-    return () => {
-      cancelled = true;
-      clearTimeout(handle);
-    };
-  }, [translateQuery, dictReady]);
+    const result = translated.join('');
+    return result.trim() ? result : null;
+
+  }, [translateQuery, translationMaps]);
+
+  const suggestions = useMemo(() => {
+    const rawQuery = translateQuery.trim();
+    if (!rawQuery || rawQuery.includes(' ')) return [];
+    const query = rawQuery.toLowerCase();
+
+    const { englishMap, turkishMap } = translationMaps;
+    const combined = new Map<string, string[]>();
+
+    englishMap.forEach((values, key) => {
+      if (key.startsWith(query)) combined.set(key, values);
+    });
+
+    turkishMap.forEach((values, key) => {
+      if (key.startsWith(query)) combined.set(key, values);
+    });
+
+    return Array.from(combined.entries())
+      .slice(0, 10)
+      .map(([word, meanings]) => ({
+        word,
+        meaning: meanings.join(', '),
+      }));
+  }, [translateQuery, translationMaps]);
+
 
   const [folderModalVisible, setFolderModalVisible] = useState(false);
   const [folderName, setFolderName] = useState('');
@@ -156,120 +184,39 @@ export default function HomeScreen() {
     <ThemedView style={styles.container}>
       {userMenu}
       {authButtons}
-      <ThemedText type="title" style={styles.title}>Ingilizce Sozluk</ThemedText>
+      <ThemedText type="title" style={styles.title}>İngilizce Sözlük</ThemedText>
 
       <TextInput
         style={styles.searchInput}
-        placeholder="Kelimeyi cevir..."
+        placeholder="Kelimeyi çevir..."
         value={translateQuery}
         onChangeText={setTranslateQuery}
       />
 
       {suggestions.length > 0 && (
         <View style={styles.suggestionsBox}>
-          {suggestions.map(word => (
+          {suggestions.map(item => (
             <TouchableOpacity
-              key={word}
+              key={item.word}
               style={styles.suggestionItem}
-              onPress={() => setTranslateQuery(word)}
+              onPress={() => setTranslateQuery(item.word)}
             >
-              <ThemedText style={styles.suggestionWord}>{word}</ThemedText>
+              <ThemedText style={styles.suggestionWord}>{item.word}</ThemedText>
+              <ThemedText style={styles.suggestionMeaning}>{item.meaning}</ThemedText>
             </TouchableOpacity>
           ))}
         </View>
       )}
 
-      {dictError && (
-        <ThemedText style={styles.errorText}>{dictError}</ThemedText>
-      )}
-
       {translationResult !== null && (
         <View style={styles.translationBox}>
-          <ThemedText style={styles.translationLabel}>Ceviri:</ThemedText>
+          <ThemedText style={styles.translationLabel}>Çeviri:</ThemedText>
           <ThemedText style={styles.translationText}>{translationResult}</ThemedText>
         </View>
       )}
 
-      <Modal visible={folderModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <ThemedText type="title" style={styles.modalTitle}>Yeni Klasor</ThemedText>
-            <TextInput
-              style={styles.input}
-              placeholder="Klasor adi"
-              value={folderName}
-              onChangeText={setFolderName}
-            />
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.addButton, { flex: 1 }]}
-                onPress={() => {
-                  if (folderName.trim()) {
-                    addFolder(folderName.trim());
-                    setSelectedCategory(folderName.trim());
-                  }
-                  setFolderModalVisible(false);
-                  setFolderName('');
-                }}
-              >
-                <ThemedText style={styles.addButtonText}>Olustur</ThemedText>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.addButton, { flex: 1, marginLeft: 10, backgroundColor: '#ccc' }]}
-                onPress={() => {
-                  setFolderModalVisible(false);
-                  setFolderName('');
-                }}
-              >
-                <ThemedText style={styles.addButtonText}>Iptal</ThemedText>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={authModalVisible} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            {authPurpose === 'login' || authPurpose === 'register' ? (
-              <>
-                <ThemedText type="title" style={styles.modalTitle}>
-                  {isRegisterMode ? 'Kayit Ol' : 'Giris Yap'}
-                </ThemedText>
-                <TextInput
-                  style={styles.input}
-                  placeholder="E-posta"
-                  value={authEmail}
-                  onChangeText={setAuthEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Sifre"
-                  value={authPassword}
-                  onChangeText={setAuthPassword}
-                  secureTextEntry
-                />
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity
-                    style={[styles.addButton, { flex: 1 }]}
-                    onPress={async () => {
-                      if (isRegisterMode) {
-                        const ok = await register(authEmail, authPassword);
-                        if (!ok) Alert.alert('Hata', 'E-posta zaten kayitli');
-                        else setAuthModalVisible(false);
-                      } else {
-                        const ok = await login(authEmail, authPassword);
-                        if (!ok) Alert.alert('Hata', 'Giris basarisiz');
-                        else setAuthModalVisible(false);
-                      }
-                      setAuthEmail('');
-                      setAuthPassword('');
-                    }}
-                  >
-                    <ThemedText style={styles.addButtonText}>
-                      {isRegisterMode ? 'Kayit' : 'Giris'}
+                      {isRegisterMode ? 'Kayıt' : 'Giriş'}
                     </ThemedText>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -280,7 +227,7 @@ export default function HomeScreen() {
                       setAuthPassword('');
                     }}
                   >
-                    <ThemedText style={styles.addButtonText}>Iptal</ThemedText>
+                    <ThemedText style={styles.addButtonText}>İptal</ThemedText>
                   </TouchableOpacity>
                 </View>
                 <TouchableOpacity
@@ -288,13 +235,13 @@ export default function HomeScreen() {
                   style={{ marginTop: 10 }}
                 >
                   <ThemedText style={{ textAlign: 'center' }}>
-                    {isRegisterMode ? 'Zaten hesabin var mi? Giris yap' : 'Hesabin yok mu? Kayit ol'}
+                    {isRegisterMode ? 'Zaten hesabın var mı? Giriş yap' : 'Hesabın yok mu? Kayıt ol'}
                   </ThemedText>
                 </TouchableOpacity>
               </>
             ) : authPurpose === 'pinSet' ? (
               <>
-                <ThemedText type="title" style={styles.modalTitle}>Sifre Olustur</ThemedText>
+                <ThemedText type="title" style={styles.modalTitle}>Şifre Oluştur</ThemedText>
                 <TextInput
                   style={styles.input}
                   placeholder="4 haneli PIN"
@@ -324,13 +271,13 @@ export default function HomeScreen() {
                       setPinInput('');
                     }}
                   >
-                    <ThemedText style={styles.addButtonText}>Iptal</ThemedText>
+                    <ThemedText style={styles.addButtonText}>İptal</ThemedText>
                   </TouchableOpacity>
                 </View>
               </>
             ) : (
               <>
-                <ThemedText type="title" style={styles.modalTitle}>Sifre Giriniz</ThemedText>
+                <ThemedText type="title" style={styles.modalTitle}>Şifre Giriniz</ThemedText>
                 <TextInput
                   style={styles.input}
                   placeholder="PIN"
@@ -347,12 +294,12 @@ export default function HomeScreen() {
                         setAuthModalVisible(false);
                         setFolderModalVisible(true);
                       } else {
-                        Alert.alert('Hata', 'Sifre yanlis');
+                        Alert.alert('Hata', 'Şifre yanlış');
                         setPinInput('');
                       }
                     }}
                   >
-                    <ThemedText style={styles.addButtonText}>Dogrula</ThemedText>
+                    <ThemedText style={styles.addButtonText}>Doğrula</ThemedText>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.addButton, { flex: 1, marginLeft: 10, backgroundColor: '#ccc' }]}
@@ -361,7 +308,7 @@ export default function HomeScreen() {
                       setPinInput('');
                     }}
                   >
-                    <ThemedText style={styles.addButtonText}>Iptal</ThemedText>
+                    <ThemedText style={styles.addButtonText}>İptal</ThemedText>
                   </TouchableOpacity>
                 </View>
               </>
@@ -380,7 +327,7 @@ export default function HomeScreen() {
           style={[styles.addButton, styles.folderButton]}
           onPress={onAddFolderPress}
         >
-          <ThemedText style={styles.addButtonText}>+ Klasor</ThemedText>
+          <ThemedText style={styles.addButtonText}>+ Klasör</ThemedText>
         </TouchableOpacity>
       </View>
     </ThemedView>
@@ -461,6 +408,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 10,
   },
+  // girişi gizlemek için şifre kutusu zaten input stili kullanır
   input: {
     borderWidth: 1,
     borderColor: '#ccc',
@@ -527,10 +475,140 @@ const styles = StyleSheet.create({
     color: '#1f2d3d',
     fontWeight: 'bold',
   },
-  errorText: {
-    color: '#b00020',
+  filters: {
+    marginBottom: 15,
+  },
+  categoryScroll: {
+    marginBottom: 10,
+  },
+  categoryButton: {
+    backgroundColor: '#e0e0e0',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 10,
+  },
+  categoryButtonActive: {
+    backgroundColor: '#2196F3',
+  },
+  categoryButtonText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  categoryButtonTextActive: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  favoritesButton: {
+    backgroundColor: '#FFF3CD',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#FFEAA7',
+  },
+  favoritesButtonActive: {
+    backgroundColor: '#FFD700',
+    borderColor: '#FFA500',
+  },
+  favoritesButtonText: {
+    fontSize: 14,
+    color: '#856404',
+  },
+  favoritesButtonTextActive: {
+    color: '#8B4513',
+    fontWeight: 'bold',
+  },
+  resultsCount: {
+    fontSize: 14,
+    color: '#666',
     marginBottom: 10,
     textAlign: 'center',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 18,
+    color: '#666',
+  },
+  list: {
+    flex: 1,
+  },
+  wordItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    marginBottom: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#fafafa',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  wordContent: {
+    flex: 1,
+  },
+  wordHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 5,
+  },
+  english: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+  },
+  favoriteButton: {
+    padding: 5,
+  },
+  favoriteIcon: {
+    fontSize: 20,
+  },
+  favoriteActive: {
+    color: '#FFD700',
+  },
+  turkish: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    marginBottom: 8,
+  },
+  wordMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  category: {
+    fontSize: 12,
+    color: 'white',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    fontWeight: 'bold',
+  },
+  difficulty: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  deleteButton: {
+    backgroundColor: '#ff6b6b',
+    padding: 10,
+    borderRadius: 8,
+    marginLeft: 10,
+  },
+  deleteText: {
+    color: 'white',
+    fontSize: 16,
   },
   addButton: {
     backgroundColor: '#4CAF50',
@@ -550,8 +628,3 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 });
-
-
-
-
-

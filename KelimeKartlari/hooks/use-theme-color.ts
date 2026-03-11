@@ -3,19 +3,25 @@
  * https://docs.expo.dev/guides/color-schemes/
  */
 
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useTheme } from '@react-navigation/native';
 
+/**
+ * useThemeColor - Navigation theme uyumlu renk çekme
+ *
+ * Öncelik: props ışığında (light/dark) -> navigation theme -> varsayılan
+ */
 export function useThemeColor(
   props: { light?: string; dark?: string },
-  colorName: keyof typeof Colors.light & keyof typeof Colors.dark
+  colorName: string
 ) {
-  const theme = useColorScheme() ?? 'light';
-  const colorFromProps = props[theme];
+  const navigationTheme = useTheme();
+  const colorFromProps = props[navigationTheme.dark ? 'dark' : 'light'];
 
   if (colorFromProps) {
     return colorFromProps;
-  } else {
-    return Colors[theme][colorName];
   }
+
+  // navigationTheme.colors kullanarak tema renklerini döndür (type uyumsuzluğu için cast)
+  return (navigationTheme.colors as any)[colorName] as string;
 }
+

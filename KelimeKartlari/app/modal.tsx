@@ -1,35 +1,56 @@
-import React, { useState } from 'react';
-import { StyleSheet, TextInput, TouchableOpacity, Alert, ScrollView, View } from 'react-native';
-import { Link, router } from 'expo-router';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { Link, useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useWords } from '../contexts/word-context';
 
+const DEFAULT_CATEGORIES = [
+  'Genel',
+  'Temel',
+  'Teknoloji',
+  'Eğitim',
+  'Sıfatlar',
+  'Fiiller',
+  'İsimler',
+];
+
 export default function ModalScreen() {
-  const { addWord } = useWords();
+  const router = useRouter();
+  const { addWord, words, folders } = useWords();
+
   const [english, setEnglish] = useState('');
   const [turkish, setTurkish] = useState('');
   const [category, setCategory] = useState('Genel');
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
 
-  const categories = ['Genel', 'Temel', 'Teknoloji', 'Eğitim', 'Sıfatlar', 'Fiiller', 'İsimler'];
+  const categories = useMemo(() => {
+    const fromWords = words
+      .map(word => word.category)
+      .filter((value): value is string => Boolean(value));
+    return Array.from(new Set([...DEFAULT_CATEGORIES, ...folders, ...fromWords]));
+  }, [words, folders]);
 
-  const handleAddWord = () => {
-    if (!english.trim() || !turkish.trim()) {
-      Alert.alert('Hata', 'Lütfen hem İngilizce hem Türkçe kelimeyi girin.');
+  const handleAddWord = useCallback(() => {
+    const trimmedEnglish = english.trim();
+    const trimmedTurkish = turkish.trim();
+
+    if (!trimmedEnglish || !trimmedTurkish) {
+      Alert.alert('Hata', 'Lütfen İngilizce ve Türkçe alanlarını doldurun.');
       return;
     }
-    addWord(english.trim(), turkish.trim(), category, difficulty);
+
+    addWord(trimmedEnglish, trimmedTurkish, category, difficulty);
     setEnglish('');
     setTurkish('');
     setCategory('Genel');
     setDifficulty('medium');
     router.back();
-  };
+  }, [english, turkish, category, difficulty, addWord, router]);
 
   return (
-    <ScrollView style={styles.scrollContainer}>
+    <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContent}>
       <ThemedView style={styles.container}>
         <ThemedText type="title" style={styles.title}>Yeni Kelime Ekle</ThemedText>
 
@@ -95,10 +116,12 @@ const styles = StyleSheet.create({
   scrollContainer: {
     flex: 1,
   },
+  scrollContent: {
+    flexGrow: 1,
+  },
   container: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
     padding: 20,
   },
   title: {
